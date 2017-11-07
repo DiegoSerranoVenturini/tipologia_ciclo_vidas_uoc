@@ -1,55 +1,16 @@
-#r_tipologia_ciclo_vida_ds - web scrapping
+# Tipología y ciclo de vida de los datos
 
-## Introducción
+## Componentes
 
-Esta práctica esta realizada por Diego Serrano Venturini.
+Este trabajo está realizado por Diego Serrano Venturini de forma individual
 
-A continuación vamos a cumplimentar las características solicitadas del dataset generado en el orden requerido.
+## Ficheros práctica 1 - *web scrapping*
 
-## Título
+Los siguientes ficheros constituyen la práctica 1:
 
-Empresas tecnológicas: acciones y peso web
-
-### Subtítulo. Descripción
-
-El dataset generado contiene el histórico de precios de cierre de las acciones de varias empresas tecnológicas con alto potencial de crecimiento; así como datos del peso que tienen en búsquedas de google y en redes sociales (Twitter)
-
-### Imagen
-
-### Contexto
-
-El dataset generado se enmarca dentro del ámbito financiero y de inversión. Contiene también datos de peso en web. 
-
-La parte de inversión contiene información del precio diario de cierre de las acciones en el mercado bursátil NASDAQ. 
-
-La segunda parte contiene el histórico de hits en Google Trends que nos permitirá analizar si la empresa ha tenido noticias o eventos que puedan explicar los movimientos bursátiles. La misma finalidad se aplica al número de *tweets* que tienen las empresas.
-
-### Agradecimientos
-
-Cada fuente tiene un origen y un propietario diferente:
-
-- Información financiera: Quandl
-- Búsquedas web: Google Trends
-- Tweets: Twitter
-
-### Inspiración
-
-Este dataset es interesante porque permite realizar análisis de tendencias de los precios de las acciones y extraer conocimiento para realizar inversiones.
-
-Además permitiría responder a las siguientes preguntas:
-
-- ¿Existe correlación entre el número de búsquedas en Google y la volatilidad del precio de la acción?
-- ¿Existe correlación entre el número de tweets y la volatilidad del precio de la acción?
-- ¿Es atractivo el mercado tecnológico para invertir en estos momentos?
-
-### Licencia
-
-### Código
-
-![](https)
-![](https)
-![](https)
-
-### Dataset
-
-![]()
+- 00_funs.R : construye las funciones que se emplearán en el flujo de generación del dataset
+- 01_require_packs.R : centraliza la gestión y carga de paquetes.
+- 10_conect_to_APIs.R : inicializa la conexión con las API de dónde se compondrá el dataset.
+- 11_download_data.R: decargan la información de las distintas fuentes.
+- main.R: orquestan la llamada en orden de los ficheros anteriores.
+- *nota* : en la carpeta `./ppts` se encuentra el código que genera el reporte solicitado para la entrega.

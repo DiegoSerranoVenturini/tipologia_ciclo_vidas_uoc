@@ -1,0 +1,129 @@
+---
+title: "practica 1 - web scrapping"
+author: "Diego Serrano Venturini"
+date: "November 5, 2017"
+output: pdf_document
+---
+
+A continuación vamos a cumplimentar las características solicitadas del *dataset* generado en el orden requerido.
+
+## Título
+
+Empresas tecnológicas: acciones y datos web
+
+### Subtítulo. Descripción
+
+El dataset generado contiene el histórico de precios mensuales de cierre de las acciones de varias empresas tecnológicas con alto potencial de crecimiento; así como datos del peso que tienen en búsquedas de google y en redes sociales (Twitter)
+
+### Imagen
+
+El logo del dataset lo componen las dos empresas principales que contienen el *dataset.*
+
+![logo](./logo.png)
+
+### Contexto
+
+El *dataset* generado se enmarca dentro del ámbito financiero y de inversión. Contiene también datos de peso en web. 
+
+La parte de inversión contiene información del precio mensual de cierre de las acciones en el mercado bursátil NASDAQ. 
+
+La segunda parte contiene el histórico de hits en Google Trends que nos permitirá analizar si la empresa ha tenido noticias o eventos que puedan explicar los movimientos bursátiles. La misma finalidad se aplica al número de *tweets* que tienen las empresas.
+
+### Contenido
+
+En primer lugar resaltar que las limitaciones de las plataformas empleadas han condicionado el resultado del dataset. Inicialmente la idea era generar un *dataset* que contuviera los siguientes campos:
+
+- **Equity** : Símbolo de la empresa en los mercados financieros
+- **Date**: Fecha *granularidad diaria*
+- **Cl** : precio diario de la acción al cierre del mercado 
+- **hits**: número de búsquedas en google del símbolo de la empresa
+- **num_tws**:  # numero de *tweets* en Twitter del símbolo de la empresa
+
+Sin embargo, puesto que hemos empleado dos APIS gratuitas existe un límite en el número de registros que podemos descargar por día y consulta. 
+
+Además, si se realiza una consulta a través de `gtrends` demasiado grande, los datos que devuelve el API son agregados mensuales. 
+
+Finalmente, sendas plataformas no mantienen un histórico de datos horarios o diarios de más de tres semanas.
+
+Estas limitaciones se podrían atajar construyendo un sistema automático que cada día descargara la información del día, de tal manera que se pudiera realizar un análisis con más detalle.
+
+Para dar respuesta a la práctica propuesta se ha construido un dataset diferente, con datos agregados a nivel mensual; pero con un histórico para Twitter muy reducido.
+
+El contenido del *dataset* resultante son las siguientes columnas:
+
+- **Equity**  : Símbolo de la empresa en los mercados financieros
+- **Date**    : Fecha *granularidad mensual*
+- **mCl**     : precio medio mensual de la acción al cierre del mercado 
+- **sdCl**    : desviación típica del precio diario a nivel mensual 
+- **hits**    : número de búsquedas en google del símbolo de la empresa por mes
+- **num_tws** :  # numero de *tweets* en Twitter del símbolo de la empresa
+- **num_rts** :  # numero de *retweets* en Twitter de los *tweets* con el símbolo de la empresa
+
+La obtención de los datos se ha realizado mediante consultas a tres API diferentes:
+
+- La información financiera proviene de Quandl que requiere de registrarse para poder acceder al token que permite realizar las descargas de las acciones. Una vez proporcionado el token mediante la libreria `Quandl` de R se realizan las consultas por símbolo.
+- La información de consultas web procede de Google Trends. Esta información se obtiene mediante un API abierta que proporciona Google. La librería `gtrends` de R permite el lanzamiento de varios tipos de consulta
+- Finalmente la información de Twitter requiere de la creación de una 'aplicación' dentro de Twitter para la conexión con el API de proporcionar varias credenciales personales. Posteriormente con la librería `twitteR` se extrae toda la información.
+
+### Agradecimientos
+
+Cada fuente tiene un origen y un propietario diferente:
+
+- Información financiera: el propietario es la compañía ORATS que pone a disposición de Quandl el API al que nos hemos conectado para extraer la información diaria de las acciones.  
+- Búsquedas web: el propietario de la información es Google ya que Google Trends es una web propiedad de la compañía. Los datos que proporciona provienen de datos recogidos por su propio motor de búsqueda. `<script type="text/javascript" src="https://ssl.gstatic.com/trends_nrtr/1173_RC01/embed_loader.js"></script> <script type="text/javascript"> trends.embed.renderExploreWidget("TIMESERIES", {"comparisonItem":[{"keyword":"NVDA","geo":"","time":"today 5-y"}],"category":0,"property":""}, {"exploreQuery":"date=today 5-y&q=NVDA","guestPath":"https://trends.google.com:443/trends/embed/"}); </script> `
+- Tweets: El propietario de los datos de *tweets* es Twitter. Incluimos la cita al apartado de *ownership*: `The Licensed Materials are licensed, not sold, and Twitter retains and reserves all rights not expressly granted in this Agreement. You expressly acknowledge that Twitter, its licensors and its end users retain all worldwide right, title and interest in and to the Licensed Material and Content, including all rights in patents, trademarks, trade names, copyrights, trade secrets, know-how, data (including all applications therefor), and all proprietary rights under the laws of the United States, any other jurisdiction or any treaty ("IP Rights"). You agree not to do anything inconsistent with such ownership, including without limitation, challenging Twitter’s ownership of the Twitter Marks, challenging the validity of the licenses granted herein, or otherwise copying or exploiting the Twitter Marks during or after the termination of this Agreement, except as specifically authorized herein. If you acquire any rights in the Twitter Marks or any confusingly similar marks, by operation of law or otherwise, you will, at no expense to Twitter, immediately assign such rights to Twitter`
+
+### Inspiración
+
+Este dataset nos parece interesante porque permite realizar análisis de tendencias de los precios de las acciones, además de extraer conocimiento para realizar inversiones. Este conocimiento, además, no se extraería en base a únicamente variables financieras si no también a nuevas variables exógenas que han podido recogerse gracias a las nuevas tecnologías y APIS que ponen a disposición del público general.
+
+Además permitiría responder a las siguientes preguntas:
+
+- ¿Existe correlación entre el número de búsquedas en Google y la volatilidad del precio de la acción?
+- ¿Existe correlación entre el número de tweets y la volatilidad del precio de la acción?
+- ¿Es atractivo el mercado tecnológico para invertir en estos momentos?
+- ¿Se han visto los mercados afectados por el nacimiento de tecnologías de la información y redes sociales?
+- ¿Existen *clusters* o agrupaciones de empresas en base a sus acciones y a las noticias que aparecen, diferentes al mero sector al que pertenecen?
+
+El análisis consistiría en analizar las series temporales y ver si existen correlaciones entre ellas.
+
+```{r setup, warning=FALSE, echo=TRUE}
+sapply(c('ggplot2', 'forecast'), require, character.only=TRUE)
+load('../equities_ts.RData')
+
+```
+
+```{r graficas, warning=FALSE, echo=TRUE}
+equities_ts %>% 
+  ggplot(data = .) + 
+  geom_point(aes(x=Date, y=mCl, color=(hits)), alpha=.5 ) + 
+  geom_line(aes(x=Date, y=mCl), size=.5) + 
+  facet_wrap(~Equity)+
+  scale_color_gradient(low='grey', high = '#24CF4A')+
+  labs(x='fecha', y='ganancia acción', color='# búsquedas') + 
+  theme(axis.line = element_line(colour = "black", size = 0.5, linetype = "dashed"),
+        legend.position = 'top')
+
+```
+
+### Licencia
+
+Las licencias de los datos son:
+
+- Twitter - Other:
+  
+    https://developer.twitter.com/en/developer-terms/agreement-and-policy
+
+- Google Trends - Other:
+
+    Creative Commons Attribution-ShareAlike License
+    
+- Quandl - Unknown
+
+### Código
+
+[repositorio github](https://github.com/DiegoSerranoVenturini/tipologia_ciclo_vidas_uoc)
+
+### Dataset
+
+[dataset - equities.csv](https://github.com/DiegoSerranoVenturini/tipologia_ciclo_vidas_uoc/equities.csv)

@@ -1,3 +1,3 @@
-libraries <- c('tidyverse', 'tidyquant', 'Quandl', 'gtrendsR', 'keras', 'rjson', 'twitteR')
+libraries <- c('tidyverse', 'keras', 'xts', 'forecast', 'clickR', 'tidytext', 'ggmap')
 
 sapply(libraries, loadOrInstallLibraries)

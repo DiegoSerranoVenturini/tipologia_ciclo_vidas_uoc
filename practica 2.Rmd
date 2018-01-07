@@ -1,0 +1,638 @@
+---
+title: 'practica 2 : limpieza y validacion de los datos'
+author: "Diego Serrano Venturini"
+date: "January 7, 2018"
+output: html_document
+---
+
+# Descripción práctica
+Las diferentes tareas a realizar (y justificar) son las siguientes:
+
+1. Descripción del dataset. ¿Por qué es importante y qué pregunta/problema pretende responder?
+2. Limpieza de los datos.
+    1. Selección de los datos de interés a analizar. ¿Cuáles son los campos más relevantes para responder al problema?
+    2. ¿Los datos contienen ceros o elementos vacíos? ¿Y valores extremos? ¿Cómo gestionarías cada uno de estos casos?
+3. Análisis de los datos.
+    1. Selección de los grupos de datos que se quieren analizar/comparar.
+    2. Comprobación de la normalidad y homogeneidad de la varianza. Si es necesario (y posible), aplicar transformaciones que normalicen los datos.
+    3. Aplicación de pruebas estadísticas (tantas como sea posible) para comparar los grupos de datos.
+4. Representación de los resultados a partir de tablas y gráficas.
+5. Resolución del problema. A partir de los resultados obtenidos, ¿cuáles son las conclusiones? ¿Los resultados permiten responder al problema?
+6. Código: Hay que adjuntar el código, preferiblemente en R, con el que se ha realizado la limpieza, análisis y representación de los datos. Si lo preferís, también podéis trabajar en Python.
+
+# Desarrollo de la práctica
+
+```{r setup, include=TRUE, warning=FALSE, echo = TRUE}
+# fijamos las opciones del reporte para que se muestre el código empleado
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
+# contrucción de funciones útiles para el código
+source(file = './00_funcs.R')
+# carga de librerias 
+suppressMessages(suppressWarnings(source(file = './01_require_packs.R'))) 
+# lectura de los datasets 
+source(file = './10_b_lectura_datos.R')
+# procesamiento de los datasets leídos 
+source(file = './11_procesamiento_datos.R')
+```
+
+## 1. Descripción del dataset
+
+El dataset que vamos a emplear para la práctica es el relativo a la competición *Recruit Restaurant Visitor Forecasting* de *kaggle* (<https://www.kaggle.com/c/recruit-restaurant-visitor-forecasting>).
+
+Es un dataset cuyo objetivo es servir a la construcción de un modelo de predicción de reservas de varios restaurantes en Japón. Es un conjunto de datos interesante porque proporciona información sociocultural de la población japonesa. Permite dar respuesta a preguntas como:
+
+- ¿Existen períodos con más reservas?
+- ¿Cuáles son las costumbres de ocio de la población japonesa según el día de la semana?
+- ¿Qué tipos de restaurantes son los más visitados?
+- ¿Es posible predecir las reservas de un restaurante o conjunto de restaurantes con una precisión aceptable?
+
+## 2. Limpieza de los datos.
+
+En este apartado realizaremos un primer análisis exploratorio para determinar qué datos son relevantes para responder a las preguntas planteadas en el apartado anterior. También se analizará la calidad de los datos, la presencia de valores anómalos y se realizara el tratamiento oportuno.
+
+### 2.1. Selección de los datos a emplear
+
+El dataset que estamos empleando contiene las reservas diarias de múltiples restaurantes, en concreto **5456 emplazamientos** diferentes:
+
+```{r descriptive_stores}
+df_stores %>% descriptive()
+```
+
+En la anterior tabla descriptiva del dataset observamos que tenemos todos los campos informados para todos los restaurantes.
+
+Estos restaurantes se distribuyen geográficamente en **214 áreas** que pertenecen a **13 ciudades** japonesas:
+
+```{r mapa_restaurantes}
+m <- get_map(location = c(lon=137.643, lat=35.778), zoom = 5, maptype = 'roadmap') %>% ggmap(ggmap = ., extent = 'device')
+
+m %+%
+  df_stores +
+  aes(x=store_long, y = store_lat, colour=store_city) +
+  geom_point(alpha=.3) 
+```
+La distribución por ciudades es la siguiente:
+
+```{r}
+df_stores %>% filter(!(is.na(store_city))) %>% ggplot(data=.)  +  aes(x = store_city)  +  geom_bar() +  theme_ctmz() + coord_flip()
+```
+
+En número de restaurantes se distribuyen según el tamaño de la ciudad, siendo Tokyo la que presenta una mayoría notable de los restaurantes. 
+
+La distribución de los **44 tipos** de restaurantes presenta la siguiente forma:
+
+```{r}
+df_stores %>% filter(!(is.na(store_gen)))  %>% ggplot(data=.) +  aes(x = store_gen) +  geom_bar() +  theme_ctmz() + coord_flip()
+```
+
+Observamos que existe una mayoría de restaurantes japoneses aunque la cocina internacional en sus múltiples tipos consigue agregar un volumen considerable. Es por tanto, una información interesante de mantener y analizar.
+
+A continuación vamos a analizar el conjunto de datos de las series temporales de los restaurantes:
+
+```{r descriptive_ts}
+df_reserves %>% descriptive()
+```
+
+Del conjunto de datos de las reservas podemos extraer la siguiente información:
+
+- La **media de reservas diarias es de 5 clientes**, con una desviación típica de hasta 5 clientes.
+- Tenemos un histórico de **517 días** de reservas. Esto a priori se presenta como un **histórico limitado** para realizar un análisis de series temporales clasico.
+- De los días de la semana el día más frecuente es el sábado, y el menos el lunes.
+
+Llegados a este punto se solicita plantear qué información vamos a emplear para los análisis posteriores. Según lo observado:
+
+- Debido al volumen de restaurantes (5000+) se escapa del alcance de esta práctica el análisis de la serie de cada uno de los establecimientos. Por ello se va a realizar un análisis de las reservas de cada una de las ciudades. De esta manera se responderán a las preguntas planteadas en el apartado 1.
+- Los tipos de restaurante permitirán responder alguna de las preguntas planteadas, por lo que aunque la serie a analizar será la de la ciudad se mantendrá la información de cada establecimiento para poder realizar un análisis por tipo de restaurante.
+- La información relativa al calendario (mes, fiestas, día semana, víspera fiesta/fin de semana) nos permitirá responder a alguna de las costumbres japonesas.
+
+Para justificar el cambio de objetivo del modelo de previsión mostramos el comportamiento de la serie de la ciudad de Tokio frente a todos sus establecimientos:
+
+```{r}
+df_reserves %>% 
+  select(store_id, calendar_date, reserve_visitors) %>% 
+  group_by(store_id, calendar_date) %>% 
+  summarise(reserve_visitors = sum(reserve_visitors, na.rm=TRUE)) %>%
+  left_join(df_stores, by=c('store_id')) %>% 
+  group_by(store_city, calendar_date) %>% 
+  mutate(city_reserve_visitors=mean(reserve_visitors, na.rm = TRUE)) %>% 
+  dplyr::filter(store_city == 'Tōkyō-to') %>% 
+  unique %>% 
+  na.omit %>% 
+  ggplot(data=.) +
+  geom_line(aes(x = calendar_date, y = log(reserve_visitors), group = store_id), colour='black', alpha=0.05, size=.5) +  
+  geom_line(aes(x = calendar_date, y = log(city_reserve_visitors)), colour='#226666', size=2) +  
+  theme_ctmz() + scale_x_date(date_breaks = "1 month")
+```
+
+En el gráfico observamos que, aunque existe una enorme diversidad en las series, la serie media de la ciudad recoge los efectos estacionales generales y sirve como referencia de la estructura de la serie de los establecimientos.
+
+### 2.2. *Data Quality*
+
+Como se observó en los descriptivos de cada conjunto **no** observamos existencia de **omitidos** en los datasets. 
+
+Al mismo tiempo comprobamos que tenemos la misma duración para todos los datasets:
+
+```{r}
+cat(paste0('air : ', df_air_reserve %>% summarise(fecha_min= min(visit_datetime),fecha_max= max(visit_datetime)), '\n'))
+cat(paste0('hpg : ', df_hpg_reserve %>% summarise(fecha_min= min(visit_datetime), fecha_max= max(visit_datetime)), '\n'))
+```
+
+Para analizar el caso de las anomalías vamos a representar la gráfica de las series de las ciudades:
+
+```{r}
+df_city_reserves %>% 
+  na.omit %>% 
+  ggplot(data=.) +  aes(x = calendar_date, y =reserve_visitors)  +  
+  geom_line(aes(group=store_city, colour=store_city)) +  
+  geom_point(aes(colour=store_city), alpha=.4) +  
+  theme_ctmz() +  scale_x_date(date_breaks = "15 day")
+
+```
+
+En primer lugar, observamos que la serie de Tokyo está significativamente desplazada del resto de ciudades. Se observa también que existen varios puntos, congregados en Diciembre, especialmente elevados respecto a la media general. Estos puntos son candidatos a ser considerados anomalías. 
+
+Si analizamos estos puntos desde un punto de vista sociocultural, dichos puntos corresponden a los días previos Navidad occidental y el fin de año. Podrían, por tanto, poder explicarse por algún tipo de eventos sociales tipo 'cena de empresa' que se desarrollen en esas fechas. Sin embargo, no disponemos de más que un mes de Diciembre para observar si existe estacionalidad. Por tanto, es necesario plantear la transformación de esos puntos a la hora de construir el análisis. De no hacerlo, estaremos considerando un *cluster* de días con un volumen mucho más alto que provocaría que medidas como la tendencia crezcan, cuando puede que no sea así. Por otro lado, a finales de Febrero también encontramos un cluster de días con un volumen de reservas más altos, que *sí* podemos observar en el año anterior (aunque más reducido). Estos días también son candidatos a ser transformados, pero será necesario realizar un análisis temporal que descarte que se trata de un efecto estacional.
+
+El primer paso para analizar si los puntos que se observan como anómalos, lo son, es analizar la combinación de día fiesta / vístera, día de la semana para ver si es posible achacar la subida a un efecto temporal. 
+
+NOTA: Se va a 'homogeneizar' las series transformando los valores al logaritmo. De esta manera podremos tener una visión más 'normalizada' de los datos. Además, debido a la diferencia de volumen que presenta frente al resto se mostrará Tokyo por separado.
+
+```{r}
+df_city_reserves %>% 
+  mutate(day_type = ifelse(holiday == 1, 'holiday', ifelse(visper == 1, 'visper', ifelse(wd %in% c('sábado', 'domingo'), 'we', 'nd')))) %>% 
+  filter(store_city == 'Tōkyō-to') %>% 
+  ggplot(data=.) +  aes(x = calendar_date, y = log(reserve_visitors))  +  
+  geom_line(aes(group=store_city), alpha=.5) +  
+  geom_point(aes(colour=day_type), alpha=.4) +  
+  theme_ctmz() +  scale_x_date(date_breaks = "15 day")
+```
+
+```{r}
+df_city_reserves %>% 
+  mutate(day_type = ifelse(holiday == 1, 'holiday', ifelse(visper == 1, 'visper', ifelse(wd %in% c('sábado', 'domingo'), 'we', 'nd')))) %>% 
+  filter(store_city != 'Tōkyō-to') %>% 
+  ggplot(data=.) +  aes(x = calendar_date, y = log(reserve_visitors))  +  
+  geom_line(aes(group=store_city), alpha=.5) +  
+  geom_point(aes(colour=day_type), alpha=.4) +  
+  theme_ctmz() +  scale_x_date(date_breaks = "15 day")
+```
+
+Se observa claramente que aquellos días definidos como víspera de festivo muestran una volumen mayor de reservas. Además observando la distribución temporal parece indicar que se trata de **viernes** normalmente. 
+
+Además parece claro que el día que presentaba el *cluster* con pico de reservas sigue siendo candidato a ser una 'anomalía' no explicada.
+
+```{r}
+df_city_reserves %>% 
+  mutate(day_type = ifelse(holiday == 1, 'holiday', ifelse(visper == 1, 'visper', ifelse(wd %in% c('sábado', 'domingo'), 'we', 'nd')))) %>% 
+  na.omit %>% 
+  ggplot(data=.) +  aes(x = store_city, y = log(reserve_visitors), colour=day_type)  +  
+  geom_boxplot()+
+  theme_ctmz() 
+```
+
+Viendo el análisis por ciudad, de la distribución de puntos observamos que todas las ciudades muestran uno o varios puntos por tipo de día que se sale de la distribución 'normal'. Además para la totalidad de las ciudades el punto máximo es una víspera, que corresponde con el pico observado en Diciembre. Este gráfico también sirve para observar que existen múltiples puntos que aparecen como anomalías 'inferiores', cosa que en el gráfico temporal se apreciaba de forma menos significativa.
+
+Vamos a realizar un análisis de *outliers* para analizar si existen evidencias estadísticas de que esos puntos son anómalos. Para ello emplearemos la librería *forecast* (<https://robjhyndman.com/hyndsight/forecast5/>), que realiza una detección de anómalos bastante efectivo: ajusta una curva *loess* para la parte no estacional de la serie y un descomposición STL (*seasonal, trend, loess*) para la estacional. Los residuos son marcados como anómalos si caen fuera del rango:
+
+$$
+\pm 2(q{0.9}-q{0.1})
+$$
+Dónde q, p es el p-quantil de los residuos:
+
+```{r}
+ts_tokyo          <- df_city_reserves %>% dplyr::filter(store_city == 'Tōkyō-to') %>% as.data.frame %>% select(calendar_date, reserve_visitors) %>% mutate(reserve_visitors = (reserve_visitors))
+ts_tokyo          <- ts(ts_tokyo$reserve_visitors, start=c(2016,1,1), frequency=365)
+ts_tokio_outliers <- tsoutliers(ts_tokyo)
+
+ts_tokyo %>% as.data.frame() %>% mutate(index = row_number()) %>% left_join(., ts_tokio_outliers$index %>% data.frame(index = ., outlier=1), by=c('index')) %>% mutate(outlier = ifelse(is.na(outlier), 'normal', 'outlier')) %>% 
+  ggplot(data=.) +
+  aes(x=index, y=x)+
+  geom_point(aes(colour=outlier)) + 
+  geom_line() + 
+  theme_ctmz()
+```
+
+Si analizamos la serie original encontramos varios puntos anómalos. En especial los señalados en el análisis exploratorio.
+
+Es importante señalar que si realizamos el mismo análisis con la serie logarítmica, obtenemos los siguientes resultados:
+
+```{r}
+ts_log_tokyo          <- df_city_reserves %>% dplyr::filter(store_city == 'Tōkyō-to') %>% as.data.frame %>% select(calendar_date, reserve_visitors) %>% mutate(reserve_visitors = log(reserve_visitors))
+ts_log_tokyo          <- ts(ts_log_tokyo$reserve_visitors, start=c(2016,1,1), frequency=365)
+ts_log_tokio_outliers <- tsoutliers(ts_log_tokyo)
+print(ts_log_tokio_outliers)
+
+ts_log_tokyo %>% as.data.frame() %>% mutate(index = row_number()) %>% mutate(outlier = 'normal') %>% 
+  ggplot(data=.) +
+  aes(x=index, y=x)+
+  geom_point(aes(colour=outlier)) + 
+  geom_line() + 
+  theme_ctmz()
+```
+
+El mismo análisis no devuelve ningún anómalo. Esta circunstancia plantea la siguiente cuestión: ¿debemos transformar (y normalizar) la serie antes de analizar los anómalos y realizar el análisis de anómalos para sustituirlos; o analizarlos, sustituirlos y después homogeneizar la serie?
+
+En este caso, nos encontramos con una serie pobre en histórico, y que no nos permite determinar si esos puntos son anómalos o si se trata de una cuestión estacional. Por tanto, asumir esos puntos cómo *no-outliers* sería, en nuestra opinión asumir un error para la predicción de los siguientes meses, ya que la tendencia se vería notablemente modificada. Por ello, consideramos que la mejor opción es aplicar la homegeización logarítmica a la serie transformada y modificada, es decir, sin anómalos.
+
+Para esa transformación vamos a emplear el resultado de la extrapolación que realiza la función *tsoutliers*:
+
+```{r}
+ts_tokyo_modified <- 
+  ts_tokyo %>%
+  as.data.frame() %>% 
+  mutate(index = row_number()) %>% 
+  left_join(., cbind(index=ts_tokio_outliers$index, replacement=ts_tokio_outliers$replacements) %>% as.data.frame(), by=c('index')) %>% 
+  mutate(x = ifelse(is.na(replacement), x, replacement), store_city = 'Tōkyō-to') %>% 
+  pull(x)
+
+ts_tokyo_modified %>% 
+  data.frame(y=.) %>% 
+  mutate(x=row_number()) %>% 
+  cbind(., y_original= ts_tokyo %>% as.vector()) %>% 
+  ggplot(data=.)+
+  aes(x=x)+
+  geom_line(aes(y=y_original), colour = '#191654', size=1.5) + 
+  geom_line(aes(y=y), colour = '#43C6AC', size=1.25) + 
+  theme_ctmz()
+```
+
+Cómo se puede observar hemos sustituido la serie original por una mucho más homogénea y sin valores anómalos. 
+
+Sin embargo, si nos fijamos en el extremo derecho de la serie vemos que la media se ha desplomado. Parece que los valores se mantienen estables dentro de la caída, pero es un síntoma preocupante, ya que no cuadran con el valor que venía teniendo la serie. El problema puede ser real o deberse a un problema de escala de las reservas. Al principio del apartado hemos comprobado que las duraciones de los dos datasets de origen corresponden, por lo que no se trata de un problema de que un sistema tenga más datos que otro. Esta caida del volumen medio, que no es posible detectar como valor anómalo y, sin embargo, parece sospechosa, por lo que al no ser posible descartar con el propietario de los datos si es un error o no, podríamos no considerar estos valores para el análisis de la serie. 
+
+## 3. Análisis de los datos.
+
+En este apartado vamos a plantear aquellos análisis que realizaremos en los apartados 4 y 5. Se realizarán también pruebas estadísticas que permitan conocer la naturaleza del problema que nos ocupa.
+
+### 3.1. Selección de los grupos de datos que se quieren analizar/comparar.
+
+Los datos que vamos a analizar son las series temporales modificadas para cada ciudad. Para ello vamos a analizar los anómalos de cada serie.
+
+También vamos a analizar las series temporales de los tipos de restaurante, de forma que obtendremos información de si algún tipo de restaurante se comporta de manera diferente al resto.
+
+```{r}
+df_city_reserves_transform <- data.frame()
+
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  # filtramos la serie para únicamente modificar la ciudad que estamos analizando
+  df <- df_city_reserves %>% dplyr::filter(store_city == city)
+  # transformamos la serie
+  df <- transform_series(df) %>% as.data.frame()
+  # componemos el dataset completo
+  df_city_reserves_transform <- rbind(df_city_reserves_transform, df)
+}
+```
+
+### 3.2. Comprobación de la normalidad y homogeneidad de la varianza. Si es necesario (y posible), aplicar transformaciones que normalicen los datos.
+
+En este subapartado veremos qué aspecto tienen las reservas de los restaurantes y si cumplen una distribución normal, poisson, etc.
+
+```{r}
+df_city_reserves_transform %>% dplyr::filter(store_city == 'Tōkyō-to') %>% ggplot(data=.) +  aes(x = (reserve_visitors))  +   geom_density(aes(group=store_city, fill=store_city), alpha=.4)
+```
+
+```{r}
+df_city_reserves_transform %>% dplyr::filter(store_city != 'Tōkyō-to') %>% ggplot(data=.) +  aes(x = (reserve_visitors))  +   geom_density(aes(group=store_city, fill=store_city), alpha=.4)
+```
+
+Las distribuciones a priori no tienen aspecto de normal. Vamos a realizar un *shapiro test* para chequear la normalidad de los valores
+
+```{r}
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  shapiro_test <- 
+    df_city_reserves_transform %>% 
+    dplyr::filter(store_city == city) %>% pull(reserve_visitors) %>% 
+    shapiro.test()
+  
+  if(shapiro_test$p.value<0.05)
+  {
+    cat(paste0('Las reservas en ', city, ' no se distribuyen siguiendo una normal.\n'))
+  }else{
+    cat(paste0('Las reservas en ', city, ' se distribuyen siguiendo una normal.\n'))
+  }
+}
+```
+
+El resultado de este análisis es que las distribuciones de **ninguna** de las ciudades sigue una normal.
+
+Cómo ya hicimos en el apartado anterior vamos a analizar si una transformación logarítmica sirve para normalizar la serie:
+
+
+```{r}
+df_city_reserves_transform %>% dplyr::filter(store_city == 'Tōkyō-to') %>% ggplot(data=.) +  aes(x = log(reserve_visitors))  +   geom_density(aes(group=store_city, fill=store_city), alpha=.4)
+```
+
+```{r}
+df_city_reserves_transform %>% dplyr::filter(store_city != 'Tōkyō-to') %>% ggplot(data=.) +  aes(x = log(reserve_visitors))  +   geom_density(aes(group=store_city, fill=store_city), alpha=.4)
+```
+
+Las distribuciones a priori tampoco tienen un aspecto de normal, salvo algún caso.
+
+```{r}
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  shapiro_test <- 
+    df_city_reserves %>% 
+    dplyr::filter(store_city == city) %>% pull(reserve_visitors) %>% log %>% 
+    shapiro.test()
+  
+  if(shapiro_test$p.value<0.05)
+  {
+    cat(paste0('El log de las reservas en ', city, ' no se distribuyen siguiendo una normal.\n'))
+  }else{
+    cat(paste0('El log de las reservas en ', city, ' se distribuyen siguiendo una normal.\n'))
+  }
+}
+```
+
+El test de shapiro corrobora esta impresión. Analizando más a fondo la distribución (de Tokyo) podemos observar que tiene varios picos. Cómo última aproximación podemos chequear si esta no-normalidad se debe a la influencia del día de la semana que antes hemos observado.
+
+Vamos a analizar el caso de Tokyo:
+
+```{r}
+df_city_reserves_transform %>% dplyr::filter(store_city == 'Tōkyō-to') %>% ggplot(data=.) +  aes(x = log(reserve_visitors))  +  geom_density(aes(fill=factor(wd)), alpha=.4)
+```
+
+```{r}
+for(weekday in (df_city_reserves %>% na.omit %>% pull(wd) %>% unique))
+{
+  shapiro_test <- 
+    df_city_reserves %>% 
+    dplyr::filter(store_city == 'Tōkyō-to' & wd == weekday) %>% pull(reserve_visitors) %>% 
+    log %>% 
+    shapiro.test()
+  
+  if(shapiro_test$p.value<0.05)
+  {
+    cat(paste0('El log de las reservas en ', weekday, ' no se distribuyen siguiendo una normal.\n'))
+  }else{
+    cat(paste0('El log de las reservas en ', weekday, ' se distribuyen siguiendo una normal.\n'))
+  }
+}
+```
+
+No podemos asegurar que las reservas tengan forma normal. Posteriores análisis de otras hipótesis estadísticas nos dirán si es posible construir un análisis estadístico en base a estos datos.
+
+### 3.2. Aplicación de pruebas estadísticas (tantas como sea posible) para comparar los grupos de datos.
+
+Puesto que se trata de una serie temporal vamos a realizar los siguientes tests:
+
+1. Normalidad de la serie: nos indicara si la serie temporal tiene una estructura 'blanca'
+2. Normalidad del logaritmo de la serie: cuando los valores de la serie varia en órdenes de magnitud de 10E3 es conveniente analizar el logaritmo para 'normalizar' los posibles valores extremos
+3. Autocorrelación de la serie: nos indica si los valores de la serie dependen de momentos en el pasado de la misma
+4. Varianza condicional de la serie: muchas series temporales muestran autocorrelación no solo en los valores de la propia serie si no en la varianza de la misma. Esto se muestra frecuentemente en series con mucha inercia como los activos financieros, las ventas de productos de moda, etc. A menudo la metodología de testeo es constuir un modelo arima y chequear si existen efectos 'ARCH' en los residuos. Es posible también anticipar estos efectos analizando la autocorrelación de la varianza de la serie 'de-tendenciada'.
+
+Los dos primeros tests ya los hemos realizado. Los siguientes nos servirán para determinar si la serie es 'ruido blanco' o si es posible construir un modelo autoregresivo en base a los datos. 
+
+Pese a que los datos presentaban una distribución normal; la transformación logarítmica cuasi-convertía las distribuciones en normales, por lo que vamos a proseguir con los análisis por esa vía.
+
+```{r tranformacion_log_serie}
+df_city_reserves_transform <- df_city_reserves_transform %>% mutate(reserve_visitors = reserve_visitors %>% log)
+```
+
+```{r}
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  ts <- 
+    df_city_reserves_transform %>% 
+    dplyr::filter(store_city == city) %>% 
+    pull(reserve_visitors) %>% 
+    as.ts()
+  
+  acf(ts, main = paste0(city, ': plot correlación temporal'))
+  # plot(p, main = paste0(city, ': plot correlación temporal'))
+  
+  box_tst <- Box.test(ts)
+  
+  if(box_tst$p.value<0.05)
+  {
+    cat(paste0('El log de las reservas en ', city, ' muestran correlación temporal.\n'))
+  }else{
+    cat(paste0('El log de las reservas en ', city, ' no muestran correlación temporal.\n'))
+  }
+}
+```
+
+El primero de los tests sale positivo para todos los casos, es decir, existe correlación temporal para las series de todas las ciudades. Esto nos permite construir un modelo autoregresivo que debería permitir la predicción de las series. El conjunto de gráficas generada presenta la prueba visual del test realizado.
+
+A continuación vamos a analizar si las series presentan efectos de varianza condicionada:
+
+```{r}
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  ts <- 
+    df_city_reserves_transform %>% 
+    dplyr::filter(store_city == city) %>% 
+    pull(reserve_visitors) %>% 
+    as.ts()
+
+  ret <- diff(ts)
+  var=(ret-mean(ret))^2
+  plot(var, main = paste0(city, ': varianza de la diferencia entre días'))
+  
+  box_tst1 <- Box.test(var,lag=26,type='Ljung')
+  
+  if(box_tst1$p.value<0.05)
+  {
+    cat(paste0('la serie de las reservas en ', city, ' muestran efectos de varianza condicionada.\n'))
+  }else{
+    cat(paste0('la serie de las reservas en ', city, ' no muestran efectos de varianza condicionada.\n'))
+  }
+}
+```
+
+Salvo *Kanagawa* y *Saitama* todas las series muestran también *clusters* o agrupaciones de varianza, donde el hecho de que un día haya un pico en las reservas parece provocar un efecto en las reservas posteriores. En los gráficos de la varianza condicionada aparecen los últimos días de la serie como un *cluster* de varianza. 
+
+## 4. Representación de los resultados.
+
+- ¿Existen períodos con más reservas?
+- ¿Cuáles son las costumbres de ocio de la población japonesa en fin de semana?
+- ¿Qué tipos de restaurantes son los más visitados?
+- ¿Es posible predecir las reservas de un restaurante o conjunto de restaurantes con una precisión aceptable?
+
+En esta sección vamos a resumir de forma gráfica las respuestas a las preguntas planteadas en el apartado 1. Dejaremos la pregunta 4 para el apartado 5 ya que implica la construcción del modelo que dará respuesta al problema.
+
+### Análisis temporal de las reservas (preguntas 1 y 2)
+
+Hemos observado que existen diferencias significativas entre varios tipos de días: *entre-semana*, *fin de semana*, *festivo* y *víspera* (box-plot apartado 2.2). Sin embargo, no hemos analizado la estacionalidad mensual. Si bien se ha observado un aumento considerable de las reservas en Diciembre, vamos a analizar el resto de meses:
+
+```{r}
+df_city_reserves %>% 
+  mutate(calendar_month = months(calendar_date) %>% factor(levels = c('enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'))) %>% 
+  group_by(calendar_month, store_city) %>% 
+  mutate(median_reserves = median(log(reserve_visitors))) %>% 
+  ggplot(data=.) +  aes(x = calendar_month, y = log(reserve_visitors), colour=store_city)  +  
+  geom_boxplot()+
+  geom_line(aes(y = median_reserves, group=store_city))
+  theme_ctmz() 
+```
+
+Es posible observar que las diferencias en el comportamiento estacional de las ciudades son pequeñas. El mes con más reservas es Diembre en prácticamente todos los casos, seguido de Marzo. Los meses con menos son Mayo o Agosto.
+
+```{r}
+df_city_reserves %>% 
+  mutate(calendar_month = months(calendar_date) %>% factor(levels = c('enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'))) %>% 
+  group_by(calendar_month) %>% 
+  summarise(num_fiestas = sum(holiday)) %>% 
+  ggplot(data=.) +  aes(x = calendar_month, y = num_fiestas)  +  
+  geom_bar(stat='identity', position='dodge')
+  theme_ctmz() 
+```
+
+Un punto interesante a destacar es que Mayo y Junio aparecen como dos de los meses con más fiestas, lo cual según el análisis por tipo de día que se mostró, explicaría el menor volumen de reservas. 
+
+Finalmente vamos a comprobar si el efecto positivo de las vísperas se debe a incluir los viernes. Vamos a analizar la media de ventas en viernes y en víspera de festivo.
+
+```{r}
+df_reserves %>% 
+  select(store_id, calendar_date, reserve_visitors, holiday_flg) %>% 
+  group_by(store_id, calendar_date) %>% 
+  summarise(
+    reserve_visitors = sum(reserve_visitors, na.rm=TRUE)
+    , holiday        = max(holiday_flg, na.rm =TRUE)) %>%
+  left_join(df_stores, by=c('store_id')) %>% 
+  group_by(store_city, calendar_date) %>% 
+  summarise(reserve_visitors=sum(reserve_visitors, na.rm = TRUE), holiday = max(holiday, na.rm =TRUE)) %>% 
+  arrange(store_city, calendar_date) %>% 
+  mutate(
+    wd       = weekdays(calendar_date)
+    ,day_to  = lead(wd)
+    ,hld_to  = lead(holiday)
+    ,visper  = ifelse(holiday==0 & hld_to ==1, 1, 0)  
+  ) %>% 
+  select(-day_to, -hld_to) %>% 
+  mutate(day_type = ifelse(holiday == 1, 'holiday', ifelse(visper == 1, 'visper', ifelse(wd %in% c('sábado', 'domingo'), 'we', ifelse(wd == 'viernes', 'viernes', 'nd'))))) %>% 
+  na.omit %>% 
+  filter(day_type %in% c('visper', 'viernes')) %>% 
+  ggplot(data=.) +  aes(x = store_city, y = log(reserve_visitors), colour=day_type)  +  
+  geom_boxplot()+
+  theme_ctmz() 
+```
+
+las diferencias son pequeñas, estando la mediana de las vísperas por encima de la media de los viernes.
+
+El análisis pendiente de realizar es si existen tipos de restaurante 'más de moda' o 'más frecuentados'.
+
+```{r}
+df_reserves %>% 
+  select(store_id, reserve_visitors) %>% 
+  group_by(store_id) %>% 
+  summarise(reserve_visitors = sum(reserve_visitors, na.rm=TRUE)) %>%
+  left_join(df_stores, by=c('store_id')) %>% 
+  group_by(store_gen, store_city) %>% 
+  summarise(type_reserve_visitors=mean(reserve_visitors, na.rm = TRUE)) %>% 
+  na.omit %>% 
+  ggplot(data=.) +
+  geom_bar(aes(x = store_gen, y = (type_reserve_visitors), fill=store_city), stat = 'identity', position = 'dodge') +  
+  theme_ctmz() 
+```
+
+Vemos que existen diferencias significativas en las reservas por tipo de restaurante y ciudad. Como resultados interesantes podemos destacar:
+
+- La cocina italiana/francesa está altamente valorada en Shizuoka
+- La categoría cocina creativa sólo existe en Fukuoka,Tokyo y Hyogo; aunque bajo la categoría 'creativa' sí aparece en todas las ciudades. El volumen de reservas que presentan es alto.
+- Por norma general la cocina japonesa es la más popular.
+- Tokyo es la única ciudad con todas las categorías.
+
+## 5. Resolución del problema. 
+
+Finalmente en este apartado vamos a construir un sencillo modelo de previsión de las reservas para cada ciudad y testearlo para cuantificar su capacidad predictiva. 
+
+```{r}
+df_city_reserves_transform %>% 
+  mutate(day_type = ifelse(holiday == 1, 'holiday', ifelse(visper == 1, 'visper', ifelse(wd %in% c('sábado', 'domingo'), 'we', 'nd')))) %>% 
+  filter(store_city == 'Tōkyō-to') %>% 
+  ggplot(data=.) +  aes(x = calendar_date, y = reserve_visitors)  +  
+  geom_line(aes(group=store_city), alpha=.5) +  
+  geom_point(aes(colour=day_type), alpha=.4) +  
+  theme_ctmz() +  scale_x_date(date_breaks = "15 day")
+```
+
+Como ya se comentó en el apartado de calidad de los datos, la última parte de la serie parece sospechosa. Por ello el análisis se va a reducir a la construcción de un modelo con el año 2016 que se testeará con los dos primeros meses de 2017.
+
+```{r}
+ts_train <- 
+  df_city_reserves_transform %>% 
+  dplyr::filter(store_city == 'Tōkyō-to') %>% 
+  filter(calendar_date < '2017-01-01') %>% 
+  as.data.frame %>% 
+  select(calendar_date, reserve_visitors) %>% 
+  mutate(reserve_visitors = reserve_visitors)
+
+ts_train <- ts(ts_train$reserve_visitors, start=c(2016,1,1), frequency=365)
+
+plot(ts_train)
+```
+
+```{r}
+arima_fit <- auto.arima(ts_train)
+
+ts_test <-
+  df_city_reserves %>% 
+  dplyr::filter(store_city == city) %>% 
+  filter(calendar_date >= '2017-01-03' & calendar_date <= '2017-02-28') %>% 
+  pull(reserve_visitors) %>% 
+  as.ts()
+
+preds <- forecast(arima_fit, h = ts_test %>% length())
+
+plot(preds)
+```
+
+```{r}
+cbind(pred = preds[['mean']] %>% as.vector %>% exp, real=ts_test %>% as.vector()) %>% as.data.frame() %>% mutate(index = row_number()) %>% 
+  ggplot(data=.) + aes(x=index) + geom_line(aes(y=pred), colour = '#191654') + geom_line(aes(y=real), colour = '#43C6AC')
+```
+
+```{r}
+print(accuracy(preds[['mean']]%>% as.vector %>% exp %>% as.ts, ts_test %>% as.vector %>% as.ts))
+```
+
+Vemos que el modelo se equivoca en unos 5000 clientes de media, lo cual es especialmente alto. El error se recrudece especialmente en Febrero donde el modelo sigue creciendo con la tendencia de Diciembre (¡incluso después de limpiar los *outliers*!), y, sin embargo, la serie no decrece. Este efecto 'inercial' de la serie temporal es en parte debido a no ser posible el cálculo de una estacionalidad mensual, por falta de histórico. Sin embargo vemos que el efecto estacional semanal lo capta el modelo con buena precisión.
+
+Un enfoque alternativo que nos permitiría lidiar con la ausencia de 'ciclos' sería construir un modelo lineal con variables autoregresivas, variables cualitativas con el día de la semana y el mes, incluyendo 'efectos aleatorios' en el número de reservas base: un *modelo mixto*.
+
+Otro modelo que se podría emplear aunque escapa del alcance de la asignatura es una red neuronal recursiva (RNN). Este tipo de modelos aprende de la misma serie, como un modelo autoregresivo, incluso incluyendo elementos de 'memoria' como estacionalidades pero no es tan dependiente de la existencia de varios períodos de estacionalidad.
+
+Para finalizar extenderemos el análisis realizado al resto de ciudades:
+
+```{r}
+for(city in (df_city_reserves %>% na.omit %>% pull(store_city) %>% unique))
+{
+  ts_train <- 
+  df_city_reserves_transform %>% 
+  dplyr::filter(store_city == city) %>% 
+  filter(calendar_date < '2017-01-01') %>% 
+  as.data.frame %>% 
+  select(calendar_date, reserve_visitors) %>% 
+  mutate(reserve_visitors = reserve_visitors)
+
+  ts_train <- ts(ts_train$reserve_visitors, start=c(2016,1,1), frequency=365)
+  
+  arima_fit <- auto.arima(ts_train)
+  
+  ts_test <-
+    df_city_reserves %>% 
+    dplyr::filter(store_city == city) %>% 
+    filter(calendar_date >= '2017-01-03' & calendar_date <= '2017-02-28') %>% 
+    pull(reserve_visitors) %>% 
+    as.ts()
+  
+  preds <- forecast(arima_fit, h = ts_test %>% length())
+  acc   <- accuracy(preds[['mean']]%>% as.vector %>% exp %>% as.ts, ts_test %>% as.vector %>% as.ts)
+  print(paste0('precision (RMSE): ', city, ' ',round(acc[2], 2)))
+  print(paste0('precision (MAPE): ', city, ' ',round(acc[5], 2)))
+}
+```
+
+Vemos que para todas las ciudades el error es alto (no existen MAPE's por debajo del 50%). 
+
+Para concluir el trabajo vamos a resumir las conclusiones obtenidas del estudio:
+
+1. Es posible construir un modelo por ciudades, sin embargo, requeriría se:
+    1. más trabajo de modelado. Un simple modelo *auto.arima* sin trabajar no consigue predecir de forma adecuada. Sería interesante probar modelos dinámicos, modelos mixtos o RNNs.
+    2. más trabajo de inclusión de variables. Construir regresores que aglutinen la información de tipo de restaurante, fiestas, etc., en el modelo. 
+    2. más análisis de las circunstancias de los restaurantes que las componen, ya que al agregar se pierde mucha información de detalle importante.
+2. La serie mostraba algún valor anómalo que ha sido tratado pero presentaba un limpieza de los datos alta.

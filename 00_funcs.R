@@ -11,30 +11,34 @@ loadOrInstallLibraries <- function(.library)
   }
 }
 
-#funcion para la descarga de acciones
-# descarga historico -----
-downloadEquities <- function(equity, src='WIKI', window.start='1800-01-01', window.end='9999-12-31')
+#definición estilo:
+theme_ctmz <- function(size_font=10, font='Helvetica')
 {
-  start_time <- Sys.time()
-  print(paste('Descargando: ', equity))
+  theme_classic(
+    base_size = size_font, base_family = font)+
+    theme(
+      axis.line       = element_line(colour = "black", size = 0.5, linetype = "dashed"),
+      legend.position = 'top',
+      axis.text.x     = element_text(angle = 45, size = size_font)
+    )
+}
+
+# funcion para la transformacion de las series temporales (limpiando outliers)
+transform_series <- function(df)
+{
+  ts          <- df %>% as.data.frame %>% select(calendar_date, reserve_visitors) %>% mutate(reserve_visitors = (reserve_visitors))
+  ts          <- ts(ts$reserve_visitors, start=c(2016,1,1), frequency=365)
+  ts_outliers <- tsoutliers(ts)
   
-  code          <- paste0(src, '/', equity)
-  equity_var    <- 'Adj. Close'; 
-  Date          <- 'Date'
+  if(length(ts_outliers$index)>0)
+  {
+    ts_modified <- ts %>% as.data.frame() %>% mutate(index = row_number()) %>% left_join(., cbind(index=ts_outliers$index, replacement=ts_outliers$replacements) %>% as.data.frame(), by=c('index')) %>% 
+      mutate(x = ifelse(is.na(replacement), x, replacement)) %>% pull(x) %>% as.vector()
+  }else{
+    ts_modified <- ts %>% as.vector()
+  }
   
-  tryCatch(
-    {
-      df.downloaded <- 
-        Quandl(code = code, collapse = 'daily', transform = 'rdiff') %>% 
-        select(Date, matches(equity_var)) %>% 
-        set_names(c('Date', 'Cl')) %>% 
-        mutate(Equity=equity) %>% 
-        filter( (Date > (window.start %>% as.Date)) & (Date < (window.end %>% as.Date))) %>% 
-        mutate(Date= Date %>% as.Date())
-      return(df.downloaded)
-    },
-    error = function(e) 
-    {
-      return(data.frame)
-    })
+  df$reserve_visitors <- ts_modified
+  
+  return(df)
 }
